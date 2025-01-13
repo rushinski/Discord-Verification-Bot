@@ -1,146 +1,104 @@
 const { Events } = require('discord.js');
 const sharp = require('sharp');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-const tesseract = require('tesseract.js');
 const fs = require('fs');
 const path = require('path');
-
-const referenceImages = {
-  addApBtn: './src/images/referenceImages/addApBtn.png',
-  settingsBtn: './src/images/referenceImages/settingsBtn.png',
-};
-const savedImagesPath = './src/images/savedImages';
-const whitelistedAlliances = ['AllianceA', 'AllianceB', 'AllianceC'];
-
-function compareImages(buffer1, buffer2) {
-  return Promise.all([sharp(buffer1).raw().toBuffer(), sharp(buffer2).raw().toBuffer()])
-    .then(([image1, image2]) => {
-      if (image1.length !== image2.length) return false;
-      for (let i = 0; i < image1.length; i++) {
-        if (image1[i] !== image2[i]) return false;
-      }
-      return true;
-    });
-}
 
 module.exports = {
   name: Events.MessageCreate,
   async execute(message) {
     const targetChannelId = '1328080329101017199';
 
+    // Check if the message is in the target channel
     if (message.channel.id !== targetChannelId) return;
 
     console.log(`Message received in channel: ${message.channel.id}`);
 
+    // Ensure there is at least one attachment in the message
     if (message.attachments.size === 0) {
       console.log('No attachments in the message.');
       return;
     }
 
     for (const attachment of message.attachments.values()) {
-      if (attachment.contentType.startsWith('image/')) {
+      if (attachment.contentType && attachment.contentType.startsWith('image/')) {
         console.log('Image detected, processing...');
+
         try {
           // Fetch the image from the URL
           const response = await fetch(attachment.url);
           const arrayBuffer = await response.arrayBuffer();
           const imageBuffer = Buffer.from(arrayBuffer);
 
-          // Check image metadata
-          const metadata = await sharp(imageBuffer).metadata();
-          console.log('Image metadata:', metadata);
+          // Convert the image to grayscale and get its raw pixel data
+          const { data: grayscaleData, info } = await sharp(imageBuffer)
+            .grayscale()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
 
-          const cropArea = { left: 152, top: 93, width: 1608, height: 885 };
-          if (
-            cropArea.left + cropArea.width > metadata.width ||
-            cropArea.top + cropArea.height > metadata.height
-          ) {
-            console.error('Crop area exceeds image dimensions. Skipping.');
-            await message.author.send(
-              `Hi ${message.author.username}, your image couldn't be processed because it's too small. ` +
-              `The minimum dimensions are ${cropArea.width}x${cropArea.height} pixels. Please upload a larger image.`
-            ).catch(console.error);
-            await message.delete();
-            return;
+          const width = info.width;
+          const height = info.height;
+
+          // Analyze brightness values to find the bounding box of the bright area
+          let minX = width, minY = height, maxX = 0, maxY = 0;
+
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const pixelValue = grayscaleData[y * width + x]; // Get pixel brightness (0-255)
+
+              // Threshold: Consider bright areas as part of the governor profile box
+              if (pixelValue > 100) { // Adjust threshold value (100) as needed
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+              }
+            }
           }
 
-          // Crop the main region of interest
+          // Ensure valid cropping dimensions
+          if (minX >= maxX || minY >= maxY) {
+            console.error('No bright region detected. Skipping.');
+            return message.author.send(
+              `Hi ${message.author.username}, your image could not be processed because the profile box could not be identified.`
+            ).catch(console.error);
+          }
+
+          console.log('Bright region detected. Cropping to:', { minX, minY, maxX, maxY });
+
+          // Crop the image dynamically to the detected region
           const croppedImageBuffer = await sharp(imageBuffer)
-            .extract(cropArea)
+            .extract({
+              left: minX,
+              top: minY,
+              width: maxX - minX + 1,
+              height: maxY - minY + 1,
+            })
             .toBuffer();
-          console.log('Image successfully cropped.');
 
-          // Save cropped main image
-          await sharp(croppedImageBuffer).toFile(
-            path.join(savedImagesPath, `croppedMain-${Date.now()}.png`)
+          // Save the cropped image in the src/images/savedImages folder
+          const savedImagesPath = path.join(process.cwd(), 'src', 'images', 'savedImages');
+          const outputFilePath = path.join(savedImagesPath, `croppedProfile-${Date.now()}.png`);
+          
+          // Ensure the directory exists before saving
+          fs.mkdirSync(savedImagesPath, { recursive: true });
+          
+          await sharp(croppedImageBuffer).toFile(outputFilePath);
+          
+          console.log('Image successfully cropped and saved:', outputFilePath);
+
+          // Delete the image from Discord after saving it
+          await message.delete().catch((err) =>
+            console.error('Failed to delete the message:', err)
           );
 
-          // Crop Add AP Button region and save
-          const addApBtnBuffer = await sharp(croppedImageBuffer)
-            .extract({ left: 400, top: 567, width: 28, height: 27 })
-            .toBuffer();
-          await sharp(addApBtnBuffer).toFile(
-            path.join(savedImagesPath, `addApBtn-${Date.now()}.png`)
-          );
-
-          const addApBtnReference = fs.readFileSync(referenceImages.addApBtn);
-          const addApMatch = await compareImages(addApBtnBuffer, addApBtnReference);
-          if (!addApMatch) {
-            console.log('Add AP Button does not match.');
-            await message.delete();
-            return message.author.send(
-              `Your image doesn't meet the expected criteria for the add AP button.`
-            ).catch(console.error);
-          }
-
-          // Crop Settings Button region and save
-          const settingsBtnBuffer = await sharp(croppedImageBuffer)
-            .extract({ left: 1459, top: 749, width: 76, height: 69 })
-            .toBuffer();
-          await sharp(settingsBtnBuffer).toFile(
-            path.join(savedImagesPath, `settingsBtn-${Date.now()}.png`)
-          );
-
-          const settingsBtnReference = fs.readFileSync(referenceImages.settingsBtn);
-          const settingsBtnMatch = await compareImages(settingsBtnBuffer, settingsBtnReference);
-          if (!settingsBtnMatch) {
-            console.log('Settings Button does not match.');
-            await message.delete();
-            return message.author.send(
-              `Your image doesn't meet the expected criteria for the settings button.`
-            ).catch(console.error);
-          }
-
-          // Process OCR for the cropped image
-          const ocrBuffer = await sharp(croppedImageBuffer)
-            .extract({ left: 552, top: 296, width: 87, height: 33 })
-            .toBuffer();
-          await sharp(ocrBuffer).toFile(
-            path.join(savedImagesPath, `ocrRegion-${Date.now()}.png`)
-          );
-
-          const { data: { text } } = await tesseract.recognize(ocrBuffer);
-          const extractedAlliance = text.replace(/[\[\]]/g, '').trim();
-          console.log('Extracted alliance name:', extractedAlliance);
-
-          if (!whitelistedAlliances.includes(extractedAlliance)) {
-            console.log('Alliance not whitelisted.');
-            await message.delete();
-            return message.author.send(
-              `Your image references an alliance (${extractedAlliance}) that is not on the whitelist.`
-            ).catch(console.error);
-          }
-
-          console.log('Image successfully validated.');
-          await message.delete();
-          console.log('Original message deleted after processing.');
         } catch (error) {
           console.error('Error processing the image:', error);
           await message.author.send(
             `Hi ${message.author.username}, there was an error processing your image. Please try again or contact support if the issue persists.`
           ).catch(console.error);
         }
-        break;
+        break; // Process only the first valid image attachment
       }
     }
   },
