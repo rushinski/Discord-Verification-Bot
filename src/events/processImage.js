@@ -75,43 +75,51 @@ module.exports = {
 
           console.log('Image successfully cropped and saved:', outputFilePath);
 
-          // Further Crop 1: Add App Button Area
-          const addApBtnBuffer = await sharp(croppedImageBuffer)
-            .extract({ left: 425, top: 591, width: 29, height: 34 })
-            .toBuffer();
+        // Further Crop 1: Add App Button Area
+        const addApBtnBuffer = await sharp(croppedImageBuffer)
+        .extract({ left: 425, top: 591, width: 29, height: 34 })
+        .toBuffer();
 
-          const referenceAddAppPath = path.join(
-            process.cwd(),
-            'src',
-            'images',
-            'referenceImages',
-            'addApBtn.png'
-          );
+        const addApBtnOutputPath = path.join(savedImagesPath, `addApBtn-${Date.now()}.png`);
+        await sharp(addApBtnBuffer).toFile(addApBtnOutputPath);
+        console.log('Cropped Add App Button saved at:', addApBtnOutputPath);
 
-          const addAppComparisonResult = await compareImages(
-            addApBtnBuffer,
-            referenceAddAppPath
-          );
-          console.log('Add App Button Comparison Result:', addAppComparisonResult);
+        const referenceAddAppPath = path.join(
+        process.cwd(),
+        'src',
+        'images',
+        'referenceImages',
+        'addApBtn.png'
+        );
 
-          // Further Crop 2: Settings Button Area
-          const settingsBtnBuffer = await sharp(croppedImageBuffer)
-            .extract({ left: 1488, top: 776, width: 62, height: 62 })
-            .toBuffer();
+        const addAppComparisonResult = await compareImages(
+        addApBtnBuffer,
+        referenceAddAppPath
+        );
+        console.log('Add App Button Comparison Result:', addAppComparisonResult);
 
-          const referenceSettingsPath = path.join(
-            process.cwd(),
-            'src',
-            'images',
-            'referenceImages',
-            'settingsBtn.png'
-          );
+        // Further Crop 2: Settings Button Area
+        const settingsBtnBuffer = await sharp(croppedImageBuffer)
+        .extract({ left: 1488, top: 776, width: 62, height: 62 })
+        .toBuffer();
 
-          const settingsComparisonResult = await compareImages(
-            settingsBtnBuffer,
-            referenceSettingsPath
-          );
-          console.log('Settings Button Comparison Result:', settingsComparisonResult);
+        const settingsBtnOutputPath = path.join(savedImagesPath, `settingsBtn-${Date.now()}.png`);
+        await sharp(settingsBtnBuffer).toFile(settingsBtnOutputPath);
+        console.log('Cropped Settings Button saved at:', settingsBtnOutputPath);
+
+        const referenceSettingsPath = path.join(
+        process.cwd(),
+        'src',
+        'images',
+        'referenceImages',
+        'settingsBtn.png'
+        );
+
+        const settingsComparisonResult = await compareImages(
+        settingsBtnBuffer,
+        referenceSettingsPath
+        );
+        console.log('Settings Button Comparison Result:', settingsComparisonResult);
 
           await message.delete().catch((err) =>
             console.error('Failed to delete the message:', err)
