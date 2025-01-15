@@ -4,6 +4,9 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const fs = require('fs');
 const path = require('path');
 const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
+const tesseract = require('tesseract.js');
+
+const keywords = ['alliance', 'keyword1', 'keyword2']; // Add your alliance-related keywords here
 
 module.exports = {
   name: Events.MessageCreate,
@@ -74,67 +77,102 @@ module.exports = {
 
           // Step 2: Define Specific Regions to Crop
           const regions = [
-          { name: 'Add App Button', left: 66, top: 108, width: 510, height: 708, ref: 'addApBtn.png' },
-          { name: 'Settings Button', left: 0, top: 533, width: 349, height: 418, ref: 'settingsBtn.png' },
+            { name: 'Add App Button', left: 66, top: 108, width: 510, height: 708, ref: 'addApBtn.png' },
+            { name: 'Settings Button', left: 0, top: 533, width: 349, height: 418, ref: 'settingsBtn.png' },
           ];
 
           // Define region extraction logic with validation
           for (const region of regions) {
-          try {
-          let searchBuffer = dynamicCropBuffer;
+            try {
+              let searchBuffer = dynamicCropBuffer;
 
-          // Special handling for Settings Button: Crop the rightmost 25% of the dynamic crop
-          if (region.name === 'Settings Button') {
-          const { width: dynamicWidth, height: dynamicHeight } = await sharp(dynamicCropBuffer).metadata();
-          const cropStartX = Math.floor(dynamicWidth * 0.75); // Start from 75% of the width
-          const cropWidth = dynamicWidth - cropStartX;
+              // Special handling for Settings Button: Crop the rightmost 25% of the dynamic crop
+              if (region.name === 'Settings Button') {
+                const { width: dynamicWidth, height: dynamicHeight } = await sharp(dynamicCropBuffer).metadata();
+                let cropStartX = Math.floor(dynamicWidth * 0.75); // Start from 75% of the width
+                let cropWidth = dynamicWidth - cropStartX;
 
-          if (cropStartX < 0 || cropWidth <= 0 || cropStartX + cropWidth > dynamicWidth) {
-          console.warn(`Invalid crop region for ${region.name}, adjusting to fit bounds.`);
-          // Adjust to ensure valid crop dimensions
-          cropStartX = Math.max(0, Math.min(cropStartX, dynamicWidth - 1));
-          cropWidth = Math.min(dynamicWidth - cropStartX, dynamicWidth);
+                if (cropStartX < 0 || cropWidth <= 0 || cropStartX + cropWidth > dynamicWidth) {
+                  console.warn(`Invalid crop region for ${region.name}, adjusting to fit bounds.`);
+                  cropStartX = Math.max(0, Math.min(cropStartX, dynamicWidth - 1));
+                  cropWidth = Math.min(dynamicWidth - cropStartX, dynamicWidth);
+                }
+
+                console.log(`Cropping to the rightmost 25% for region: ${region.name}`);
+                searchBuffer = await sharp(dynamicCropBuffer)
+                  .extract({
+                    left: cropStartX,
+                    top: 0,
+                    width: cropWidth,
+                    height: dynamicHeight,
+                  })
+                  .toBuffer();
+              }
+
+              // Step 3: Crop Each Specific Region
+              const { width: searchWidth, height: searchHeight } = await sharp(searchBuffer).metadata();
+
+              const adjustedRegion = {
+                left: Math.max(0, Math.min(region.left, searchWidth - 1)),
+                top: Math.max(0, Math.min(region.top, searchHeight - 1)),
+                width: Math.max(1, Math.min(region.width, searchWidth - region.left)),
+                height: Math.max(1, Math.min(region.height, searchHeight - region.top)),
+              };
+
+              console.log(`Adjusted region for ${region.name}:`, adjustedRegion);
+
+              const regionBuffer = await sharp(searchBuffer)
+                .extract(adjustedRegion)
+                .toBuffer();
+
+              const referenceBuffer = fs.readFileSync(path.join(referenceImagesPath, region.ref));
+              const isMatch = await matchImage(regionBuffer, referenceBuffer, 0.9);
+
+              if (!isMatch) {
+                throw new Error('Invalid match or bad extract area.');
+              }
+
+              console.log(`${region.name} match: ${isMatch}`);
+            } catch (regionError) {
+              console.error(`Error processing region ${region.name}:`, regionError.message);
+            }
           }
 
-          console.log(`Cropping to the rightmost 25% for region: ${region.name}`);
-          searchBuffer = await sharp(dynamicCropBuffer)
-          .extract({
-          left: cropStartX,
-          top: 0,
-          width: cropWidth,
-          height: dynamicHeight,
-          })
-          .toBuffer();
-          }
+          // ** Place the Alliance Region Check After All Region Processing **
+          const checkAlliance = { left: 577, top: 274, width: 391, height: 156 };
+          const extractedAllianceBuffer = await sharp(dynamicCropBuffer)
+            .extract(checkAlliance)
+            .toBuffer();
 
-          // Step 3: Crop Each Specific Region
-          const { width: searchWidth, height: searchHeight } = await sharp(searchBuffer).metadata();
+          console.log('Alliance region extracted for OCR.');
 
-          // Validate region bounds against the cropped search buffer
-          const adjustedRegion = {
-          left: Math.max(0, Math.min(region.left, searchWidth - 1)),
-          top: Math.max(0, Math.min(region.top, searchHeight - 1)),
-          width: Math.max(1, Math.min(region.width, searchWidth - region.left)),
-          height: Math.max(1, Math.min(region.height, searchHeight - region.top)),
-          };
+          const { data: { text } } = await tesseract.recognize(extractedAllianceBuffer, 'eng');
 
-          console.log(`Adjusted region for ${region.name}:`, adjustedRegion);
+          console.log('OCR result:', text);
 
-          const regionBuffer = await sharp(searchBuffer)
-          .extract(adjustedRegion)
-          .toBuffer();
+          // Check for brackets and keywords
+          const matches = text.match(/\[([^\]]+)\]/); // Match content inside brackets
+          if (matches && matches[1]) {
+            const bracketContent = matches[1].trim();
+            const isValid = keywords.some((keyword) =>
+              bracketContent.toLowerCase().includes(keyword.toLowerCase())
+            );
 
-          const referenceBuffer = fs.readFileSync(path.join(referenceImagesPath, region.ref));
-          const isMatch = await matchImage(regionBuffer, referenceBuffer, 0.9);
-
-          if (!isMatch) {
-          throw new Error('Invalid match or bad extract area.');
-          }
-
-          console.log(`${region.name} match: ${isMatch}`);
-          } catch (regionError) {
-          console.error(`Error processing region ${region.name}:`, regionError.message);
-          }
+            if (isValid) {
+              console.log('Valid alliance content found in brackets:', bracketContent);
+            } else {
+              console.error('Invalid alliance content in brackets:', bracketContent);
+              await message.author.send(
+                `Hi ${message.author.username}, your image contains invalid alliance content inside brackets: [${bracketContent}].`
+              ).catch(console.error);
+              return;
+            }
+          } else {
+            console.error('No alliance brackets or content found.');
+            await message.author.send(
+              `Hi ${message.author.username}, your image could not be processed because the text inside the alliance brackets is missing or invalid.`
+            ).catch(console.error);
+            return;
           }
 
           await message.delete().catch((err) =>
