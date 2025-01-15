@@ -1,12 +1,13 @@
 const { Events } = require('discord.js');
+const fs = require('fs');
+const tesseract = require('tesseract.js');
 const sharp = require('sharp');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-const fs = require('fs');
 const path = require('path');
 const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
-const tesseract = require('tesseract.js');
+const User = require('../models/User');
 
-const keywords = ['alliance', 'keyword1', 'keyword2']; // Add your alliance-related keywords here
+const keywords = ['DF13', 'keyword1', 'keyword2']; 
 
 module.exports = {
   name: Events.MessageCreate,
@@ -165,15 +166,72 @@ module.exports = {
               await message.author.send(
                 `Hi ${message.author.username}, your image contains invalid alliance content inside brackets: [${bracketContent}].`
               ).catch(console.error);
-              return;
             }
           } else {
             console.error('No alliance brackets or content found.');
             await message.author.send(
               `Hi ${message.author.username}, your image could not be processed because the text inside the alliance brackets is missing or invalid.`
             ).catch(console.error);
-            return;
           }
+
+            // Adjusted coordinates
+            const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
+        
+            // Extract and enhance the specified region
+            const rokIdBuffer = await sharp(dynamicCropBuffer)
+              .extract(rokIdRegion)
+              .modulate({ brightness: 1.5 }) // Adjusting brightness for better OCR
+              .toBuffer();
+        
+            console.log('Cropped and enhanced image for OCR.');
+        
+            // Ensure the folder exists
+            const saveDir = path.join(__dirname, '../src/images/savedImages');
+            if (!fs.existsSync(saveDir)) {
+              fs.mkdirSync(saveDir, { recursive: true });
+            }
+        
+            // Save the cropped image
+            const savePath = path.join(saveDir, `rokId_${Date.now()}.png`);
+            fs.writeFileSync(savePath, rokIdBuffer);
+            console.log(`Cropped region saved to ${savePath}`);
+        
+            // Run OCR on the enhanced RoK ID region
+            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
+            console.log('OCR result:', rokIdText);
+        
+            // Match and validate RoK ID format
+            const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
+        
+            if (rokIdMatch && rokIdMatch[1]) {
+              const rokid = rokIdMatch[1];
+        
+              console.log(`Extracted RoK ID: ${rokid}`);
+        
+              // Query the MongoDB database for the RoK ID
+              const existingUser = await User.findOne({ rokid });
+              if (!existingUser) {
+                console.log(`RoK ID ${rokid} not found in database. Adding new user...`);
+                // Add the user to the database
+                await User.create({
+                  discordUserId: message.author.id, // Discord User ID from the message
+                  rokid
+                });
+                await message.author
+                  .send(`Your RoK ID (${rokid}) was added successfully!`)
+                  .catch(console.error);
+              } else {
+                console.log(`RoK ID ${rokid} already exists in the database.`);
+                await message.author
+                  .send(`This RoK ID (${rokid}) already exists in our database.`)
+                  .catch(console.error);
+              }
+            } else {
+              console.error('Failed to extract a valid RoK ID.');
+              await message.author
+                .send('Could not find a valid RoK ID in the specified image region.')
+                .catch(console.error);
+            }
 
           await message.delete().catch((err) =>
             console.error('Failed to delete the message:', err)
