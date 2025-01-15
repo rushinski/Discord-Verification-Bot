@@ -3,6 +3,7 @@ const sharp = require('sharp');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const fs = require('fs');
 const path = require('path');
+const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
 
 module.exports = {
   name: Events.MessageCreate,
@@ -73,31 +74,67 @@ module.exports = {
 
           // Step 2: Define Specific Regions to Crop
           const regions = [
-            { name: 'Add App Button', left: 66, top: 108, width: 510, height: 708, ref: 'addApBtn.png' },
-            { name: 'Settings Button', left: 1380, top: 531, width: 400, height: 434, ref: 'settingsBtn.png' },
+          { name: 'Add App Button', left: 66, top: 108, width: 510, height: 708, ref: 'addApBtn.png' },
+          { name: 'Settings Button', left: 0, top: 533, width: 349, height: 418, ref: 'settingsBtn.png' },
           ];
 
-          const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
-
+          // Define region extraction logic with validation
           for (const region of regions) {
-            try {
-              // Step 3: Crop Each Specific Region
-              const regionBuffer = await sharp(dynamicCropBuffer)
-                .extract({
-                  left: region.left,
-                  top: region.top,
-                  width: region.width,
-                  height: region.height,
-                })
-                .toBuffer();
+          try {
+          let searchBuffer = dynamicCropBuffer;
 
-              const referenceBuffer = fs.readFileSync(path.join(referenceImagesPath, region.ref));
-              const isMatch = await matchImage(regionBuffer, referenceBuffer, 0.9);
+          // Special handling for Settings Button: Crop the rightmost 25% of the dynamic crop
+          if (region.name === 'Settings Button') {
+          const { width: dynamicWidth, height: dynamicHeight } = await sharp(dynamicCropBuffer).metadata();
+          const cropStartX = Math.floor(dynamicWidth * 0.75); // Start from 75% of the width
+          const cropWidth = dynamicWidth - cropStartX;
 
-              console.log(`${region.name} match: ${isMatch}`);
-            } catch (regionError) {
-              console.error(`Error processing region ${region.name}:`, regionError);
-            }
+          if (cropStartX < 0 || cropWidth <= 0 || cropStartX + cropWidth > dynamicWidth) {
+          console.warn(`Invalid crop region for ${region.name}, adjusting to fit bounds.`);
+          // Adjust to ensure valid crop dimensions
+          cropStartX = Math.max(0, Math.min(cropStartX, dynamicWidth - 1));
+          cropWidth = Math.min(dynamicWidth - cropStartX, dynamicWidth);
+          }
+
+          console.log(`Cropping to the rightmost 25% for region: ${region.name}`);
+          searchBuffer = await sharp(dynamicCropBuffer)
+          .extract({
+          left: cropStartX,
+          top: 0,
+          width: cropWidth,
+          height: dynamicHeight,
+          })
+          .toBuffer();
+          }
+
+          // Step 3: Crop Each Specific Region
+          const { width: searchWidth, height: searchHeight } = await sharp(searchBuffer).metadata();
+
+          // Validate region bounds against the cropped search buffer
+          const adjustedRegion = {
+          left: Math.max(0, Math.min(region.left, searchWidth - 1)),
+          top: Math.max(0, Math.min(region.top, searchHeight - 1)),
+          width: Math.max(1, Math.min(region.width, searchWidth - region.left)),
+          height: Math.max(1, Math.min(region.height, searchHeight - region.top)),
+          };
+
+          console.log(`Adjusted region for ${region.name}:`, adjustedRegion);
+
+          const regionBuffer = await sharp(searchBuffer)
+          .extract(adjustedRegion)
+          .toBuffer();
+
+          const referenceBuffer = fs.readFileSync(path.join(referenceImagesPath, region.ref));
+          const isMatch = await matchImage(regionBuffer, referenceBuffer, 0.9);
+
+          if (!isMatch) {
+          throw new Error('Invalid match or bad extract area.');
+          }
+
+          console.log(`${region.name} match: ${isMatch}`);
+          } catch (regionError) {
+          console.error(`Error processing region ${region.name}:`, regionError.message);
+          }
           }
 
           await message.delete().catch((err) =>
