@@ -34,47 +34,43 @@ module.exports = {
 
           // Step 1: Dynamic Cropping (Remove Dark Borders)
           const { data: grayscaleData, info } = await sharp(imageBuffer)
-            .grayscale()
-            .raw()
-            .toBuffer({ resolveWithObject: true });
+          .grayscale()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
 
           const { width, height } = info;
           let minX = width, minY = height, maxX = 0, maxY = 0;
 
           for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-              const pixelValue = grayscaleData[y * width + x];
-              if (pixelValue > 100) {
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-              }
+          for (let x = 0; x < width; x++) {
+            const pixelValue = grayscaleData[y * width + x];
+            if (pixelValue > 100) {
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
             }
+          }
           }
 
           if (minX >= maxX || minY >= maxY) {
-            console.error('No bright region detected. Skipping.');
-            return message.author.send(
-              `Hi ${message.author.username}, your image could not be processed because the profile box could not be identified.`
-            ).catch(console.error);
+          console.error('No bright region detected. Skipping.');
+          return message.author.send(
+            `Hi ${message.author.username}, your image could not be processed because the profile box could not be identified.`
+          ).catch(console.error);
           }
 
           const dynamicCropBuffer = await sharp(imageBuffer)
-            .extract({
-              left: minX,
-              top: minY,
-              width: maxX - minX + 1,
-              height: maxY - minY + 1,
-            })
-            .toBuffer();
+          .extract({
+            left: minX,
+            top: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1,
+          })
+          .toBuffer();
 
-          const savedImagesPath = path.join(process.cwd(), 'src', 'images', 'savedImages');
-          fs.mkdirSync(savedImagesPath, { recursive: true });
-          const dynamicCropPath = path.join(savedImagesPath, `dynamicCrop-${Date.now()}.png`);
-          await sharp(dynamicCropBuffer).toFile(dynamicCropPath);
+          console.log('Dynamic cropping completed.');
 
-          console.log('Dynamic cropping completed and saved at:', dynamicCropPath);
 
           // Step 2: Define Specific Regions to Crop
           const regions = [
@@ -184,17 +180,6 @@ module.exports = {
               .toBuffer();
         
             console.log('Cropped and enhanced image for OCR.');
-        
-            // Ensure the folder exists
-            const saveDir = path.join(__dirname, '../src/images/savedImages');
-            if (!fs.existsSync(saveDir)) {
-              fs.mkdirSync(saveDir, { recursive: true });
-            }
-        
-            // Save the cropped image
-            const savePath = path.join(saveDir, `rokId_${Date.now()}.png`);
-            fs.writeFileSync(savePath, rokIdBuffer);
-            console.log(`Cropped region saved to ${savePath}`);
         
             // Run OCR on the enhanced RoK ID region
             const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
