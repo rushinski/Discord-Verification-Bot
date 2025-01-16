@@ -6,6 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const path = require('path');
 const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
 const User = require('../models/User');
+const createTicket = require('../utils/ticketCreate'); // Adjust the path as necessary
 
 const keywords = ['DF13', 'keyword1', 'keyword2']; 
 
@@ -71,6 +72,9 @@ module.exports = {
 
           console.log('Dynamic cropping completed.');
 
+          // Define a list to keep track of failures
+          const failures = [];
+          console.log('Starting image processing and validation.');
 
           // Step 2: Define Specific Regions to Crop
           const regions = [
@@ -78,24 +82,19 @@ module.exports = {
             { name: 'Settings Button', left: 0, top: 533, width: 349, height: 418, ref: 'settingsBtn.png' },
           ];
 
-          // Define region extraction logic with validation
           for (const region of regions) {
             try {
+              console.log(`Processing region: ${region.name}`);
               let searchBuffer = dynamicCropBuffer;
 
-              // Special handling for Settings Button: Crop the rightmost 25% of the dynamic crop
               if (region.name === 'Settings Button') {
                 const { width: dynamicWidth, height: dynamicHeight } = await sharp(dynamicCropBuffer).metadata();
-                let cropStartX = Math.floor(dynamicWidth * 0.75); // Start from 75% of the width
+                console.log(`Dynamic crop metadata: width=${dynamicWidth}, height=${dynamicHeight}`);
+                
+                let cropStartX = Math.floor(dynamicWidth * 0.75); 
                 let cropWidth = dynamicWidth - cropStartX;
 
-                if (cropStartX < 0 || cropWidth <= 0 || cropStartX + cropWidth > dynamicWidth) {
-                  console.warn(`Invalid crop region for ${region.name}, adjusting to fit bounds.`);
-                  cropStartX = Math.max(0, Math.min(cropStartX, dynamicWidth - 1));
-                  cropWidth = Math.min(dynamicWidth - cropStartX, dynamicWidth);
-                }
-
-                console.log(`Cropping to the rightmost 25% for region: ${region.name}`);
+                console.log(`Cropping for Settings Button: StartX=${cropStartX}, CropWidth=${cropWidth}`);
                 searchBuffer = await sharp(dynamicCropBuffer)
                   .extract({
                     left: cropStartX,
@@ -106,8 +105,8 @@ module.exports = {
                   .toBuffer();
               }
 
-              // Step 3: Crop Each Specific Region
               const { width: searchWidth, height: searchHeight } = await sharp(searchBuffer).metadata();
+              console.log(`Metadata for region buffer: width=${searchWidth}, height=${searchHeight}`);
 
               const adjustedRegion = {
                 left: Math.max(0, Math.min(region.left, searchWidth - 1)),
@@ -116,107 +115,111 @@ module.exports = {
                 height: Math.max(1, Math.min(region.height, searchHeight - region.top)),
               };
 
-              console.log(`Adjusted region for ${region.name}:`, adjustedRegion);
-
-              const regionBuffer = await sharp(searchBuffer)
-                .extract(adjustedRegion)
-                .toBuffer();
-
+              console.log(`Adjusted region for cropping: ${JSON.stringify(adjustedRegion)}`);
+              const regionBuffer = await sharp(searchBuffer).extract(adjustedRegion).toBuffer();
               const referenceBuffer = fs.readFileSync(path.join(referenceImagesPath, region.ref));
+              console.log(`Comparing region ${region.name} to its reference image.`);
               const isMatch = await matchImage(regionBuffer, referenceBuffer, 0.9);
 
               if (!isMatch) {
-                throw new Error('Invalid match or bad extract area.');
+                failures.push(`Region ${region.name} did not match the reference.`);
+              } else {
+                console.log(`${region.name} matched successfully.`);
               }
-
-              console.log(`${region.name} match: ${isMatch}`);
             } catch (regionError) {
               console.error(`Error processing region ${region.name}:`, regionError.message);
+              failures.push(`Error processing region ${region.name}: ${regionError.message}`);
             }
           }
 
-          // ** Place the Alliance Region Check After All Region Processing **
+          // Alliance Region Check
           const checkAlliance = { left: 577, top: 274, width: 391, height: 156 };
-          const extractedAllianceBuffer = await sharp(dynamicCropBuffer)
-            .extract(checkAlliance)
-            .toBuffer();
+          try {
+            console.log('Starting alliance region extraction.');
+            const extractedAllianceBuffer = await sharp(dynamicCropBuffer).extract(checkAlliance).toBuffer();
+            const { data: { text } } = await tesseract.recognize(extractedAllianceBuffer, 'eng');
+            console.log('OCR result for alliance region:', text);
 
-          console.log('Alliance region extracted for OCR.');
+            const matches = text.match(/\[([^\]]+)\]/); 
+            if (matches && matches[1]) {
+              const bracketContent = matches[1].trim();
+              console.log(`Found alliance content: ${bracketContent}`);
 
-          const { data: { text } } = await tesseract.recognize(extractedAllianceBuffer, 'eng');
+              const isValid = keywords.some((keyword) =>
+                bracketContent.toLowerCase().includes(keyword.toLowerCase())
+              );
 
-          console.log('OCR result:', text);
-
-          // Check for brackets and keywords
-          const matches = text.match(/\[([^\]]+)\]/); // Match content inside brackets
-          if (matches && matches[1]) {
-            const bracketContent = matches[1].trim();
-            const isValid = keywords.some((keyword) =>
-              bracketContent.toLowerCase().includes(keyword.toLowerCase())
-            );
-
-            if (isValid) {
-              console.log('Valid alliance content found in brackets:', bracketContent);
-            } else {
-              console.error('Invalid alliance content in brackets:', bracketContent);
-              await message.author.send(
-                `Hi ${message.author.username}, your image contains invalid alliance content inside brackets: [${bracketContent}].`
-              ).catch(console.error);
-            }
-          } else {
-            console.error('No alliance brackets or content found.');
-            await message.author.send(
-              `Hi ${message.author.username}, your image could not be processed because the text inside the alliance brackets is missing or invalid.`
-            ).catch(console.error);
-          }
-
-            // Adjusted coordinates
-            const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
-        
-            // Extract and enhance the specified region
-            const rokIdBuffer = await sharp(dynamicCropBuffer)
-              .extract(rokIdRegion)
-              .modulate({ brightness: 1.5 }) // Adjusting brightness for better OCR
-              .toBuffer();
-        
-            console.log('Cropped and enhanced image for OCR.');
-        
-            // Run OCR on the enhanced RoK ID region
-            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
-            console.log('OCR result:', rokIdText);
-        
-            // Match and validate RoK ID format
-            const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
-        
-            if (rokIdMatch && rokIdMatch[1]) {
-              const rokid = rokIdMatch[1];
-        
-              console.log(`Extracted RoK ID: ${rokid}`);
-        
-              // Query the MongoDB database for the RoK ID
-              const existingUser = await User.findOne({ rokid });
-              if (!existingUser) {
-                console.log(`RoK ID ${rokid} not found in database. Adding new user...`);
-                // Add the user to the database
-                await User.create({
-                  discordUserId: message.author.id, // Discord User ID from the message
-                  rokid
-                });
-                await message.author
-                  .send(`Your RoK ID (${rokid}) was added successfully!`)
-                  .catch(console.error);
+              if (!isValid) {
+                failures.push(`Invalid alliance content: ${bracketContent}`);
               } else {
-                console.log(`RoK ID ${rokid} already exists in the database.`);
-                await message.author
-                  .send(`This RoK ID (${rokid}) already exists in our database.`)
-                  .catch(console.error);
+                console.log('Alliance content is valid.');
               }
             } else {
-              console.error('Failed to extract a valid RoK ID.');
-              await message.author
-                .send('Could not find a valid RoK ID in the specified image region.')
-                .catch(console.error);
+              failures.push('Missing or invalid alliance brackets content.');
+              console.warn('No valid alliance brackets or content found.');
             }
+          } catch (allianceError) {
+            console.error('Error during alliance region processing:', allianceError.message);
+            failures.push(`Alliance region processing error: ${allianceError.message}`);
+          }
+
+          // RoK ID Check
+          const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
+          try {
+            console.log('Extracting RoK ID region.');
+            const rokIdBuffer = await sharp(dynamicCropBuffer)
+              .extract(rokIdRegion)
+              .modulate({ brightness: 1.5 })
+              .toBuffer();
+
+            console.log('Running OCR on RoK ID region.');
+            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
+            console.log('OCR result for RoK ID region:', rokIdText);
+
+            const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
+
+            if (rokIdMatch && rokIdMatch[1]) {
+              const rokid = rokIdMatch[1];
+              console.log(`Extracted RoK ID: ${rokid}`);
+
+              const existingUser = await User.findOne({ rokid });
+              if (existingUser) {
+                failures.push(`RoK ID ${rokid} already exists in the database.`);
+                console.log(`RoK ID ${rokid} already exists.`);
+              } else {
+                console.log(`Adding RoK ID ${rokid} to the database.`);
+                await User.create({
+                  discordUserId: message.author.id,
+                  rokid,
+                });
+              }
+            } else {
+              failures.push('Failed to extract a valid RoK ID.');
+              console.warn('No valid RoK ID found in the OCR result.');
+            }
+          } catch (rokIdError) {
+            console.error('Error processing RoK ID region:', rokIdError.message);
+            failures.push(`Error processing RoK ID region: ${rokIdError.message}`);
+          }
+
+          // Ticket Creation if Failures Exist
+          if (failures.length > 0) {
+            console.log('Failures detected. Creating a ticket.');
+            try {
+              await createTicket({
+                guild: message.guild,
+                user: message.author,
+                imageBuffer: dynamicCropBuffer,
+                failures,
+              });
+
+            } catch (ticketError) {
+              console.error('Failed to create ticket:', ticketError.message);
+            }
+
+          } else {
+            console.log('Image processing passed all checks successfully.');
+          }
 
           await message.delete().catch((err) =>
             console.error('Failed to delete the message:', err)
