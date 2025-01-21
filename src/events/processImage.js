@@ -6,14 +6,26 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const path = require('path');
 const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
 const User = require('../models/User');
-const createTicket = require('../utils/ticketCreate'); // Adjust the path as necessary
-
-const keywords = ['DF13', 'keyword1', 'keyword2']; 
+const createTicket = require('../utils/ticketCreate');
+const Config = require('../models/Config');
 
 module.exports = {
   name: Events.MessageCreate,
   async execute(message) {
-    const targetChannelId = '1328080329101017199';
+    const guild = message.guild;
+    const config = await Config.findOne({ guildId: guild.id });
+
+    if (!config || !Array.isArray(config.allianceWhitelist) || !config.verificationChannelId || !config.roleId || !config.ticketCategoryId) {
+      console.warn('Configuration is incomplete for guild:', guild.id);
+    
+      return interaction.reply({
+        content: 'Configuration is incomplete. Please set it up using the `/config-system` command.',
+        ephemeral: true,
+      });
+    }
+
+    const keywords = config.allianceWhitelist;
+    const targetChannelId = config.verificationChannelId;
 
     if (message.channel.id !== targetChannelId) return;
 
