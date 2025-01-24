@@ -8,28 +8,52 @@ const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'reference
 const User = require('../models/User');
 const createTicket = require('../utils/ticketCreate');
 const Config = require('../models/Config');
+const assignRoles = require('../utils/assignRoles');
+
 
 module.exports = {
   name: Events.MessageCreate,
   async execute(message) {
-    const guild = message.guild;
-    const config = await Config.findOne({ guildId: guild.id });
-
-    if (!config || !Array.isArray(config.allianceWhitelist) || !config.verificationChannelId || !config.roleId || !config.ticketCategoryId) {
-      console.warn('Configuration is incomplete for guild:', guild.id);
+    try {
+      const guild = message.guild;
+      if (!guild) return;
     
-      return interaction.reply({
-        content: 'Configuration is incomplete. Please set it up using the `/config-system` command.',
-        ephemeral: true,
-      });
+      const config = await Config.findOne({ guildId: guild.id });
+    
+      // Check for missing configuration and log specific issues
+      const missingFields = [];
+      if (!config) missingFields.push('Configuration not found in the database');
+      if (!config?.allianceWhitelist || !Array.isArray(config.allianceWhitelist)) missingFields.push('Alliance whitelist is missing or not an array');
+      if (!config?.verificationChannelId) missingFields.push('Verification channel ID is not set');
+      if (!config?.roleId) missingFields.push('Role ID is not set');
+      if (!config?.ticketCategoryId) missingFields.push('Ticket category ID is not set');
+    
+      if (missingFields.length > 0) {
+        console.warn(`Configuration issues for guild ${guild.id}: ${missingFields.join(', ')}`);
+        return; // Stop further execution if the configuration is incomplete
+      }
+    
+      const keywords = config.allianceWhitelist;
+      const targetChannelId = config.verificationChannelId;
+    
+      // Log details for debugging
+      if (!targetChannelId) {
+        console.error(`Verification channel ID is missing for guild ${guild.id}.`);
+        return;
+      }
+    
+      // If the message is not in the specified verification channel, ignore it
+      if (message.channel.id !== targetChannelId) {
+        console.log(`Message ignored. Not in the verification channel: ${targetChannelId}`);
+        return;
+      }
+    
+      // Process the message (add your image processing logic here)
+      console.log(`Processing message in the verification channel: ${message.content}`);
+      // Example: Add your image processing logic here
+    } catch (error) {
+      console.error(`An error occurred while processing the message: ${error.message}`);
     }
-
-    const keywords = config.allianceWhitelist;
-    const targetChannelId = config.verificationChannelId;
-
-    if (message.channel.id !== targetChannelId) return;
-
-    console.log(`Message received in channel: ${message.channel.id}`);
 
     if (message.attachments.size === 0) {
       console.log('No attachments in the message.');
@@ -230,7 +254,14 @@ module.exports = {
             }
 
           } else {
-            console.log('Image processing passed all checks successfully.');
+            if (passedAllChecks) {
+              const matchedKeyword = keywords.find(keyword => messageContent.includes(keyword));
+            
+              // Assign roles (default verified + specific role for matched keyword, if any)
+              await assignRoles(member, matchedKeyword);
+            
+              console.log(`All checks passed for ${member.user.tag}. Roles assigned.`);
+            }
           }
 
           await message.delete().catch((err) =>
