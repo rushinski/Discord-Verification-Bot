@@ -7,53 +7,70 @@ const path = require('path');
 const referenceImagesPath = path.join(process.cwd(), 'src', 'images', 'referenceImages');
 const User = require('../models/User');
 const createTicket = require('../utils/ticketCreate');
+const assignRoles = require('../utils/assignAllianceRole');
 const Config = require('../models/Config');
-const assignRoles = require('../utils/assignRoles');
+const Keyword = require('../models/Keyword');
 
 
 module.exports = {
   name: Events.MessageCreate,
+  
   async execute(message) {
+    const guild = message.guild;
+    if (!guild) return;
+  
     try {
-      const guild = message.guild;
-      if (!guild) return;
-    
       const config = await Config.findOne({ guildId: guild.id });
-    
-      // Check for missing configuration and log specific issues
+  
+      // Check for missing configuration
       const missingFields = [];
       if (!config) missingFields.push('Configuration not found in the database');
-      if (!config?.allianceWhitelist || !Array.isArray(config.allianceWhitelist)) missingFields.push('Alliance whitelist is missing or not an array');
       if (!config?.verificationChannelId) missingFields.push('Verification channel ID is not set');
-      if (!config?.roleId) missingFields.push('Role ID is not set');
+      if (!config?.roleId) missingFields.push('Verified role ID is not set');
       if (!config?.ticketCategoryId) missingFields.push('Ticket category ID is not set');
-    
+  
       if (missingFields.length > 0) {
         console.warn(`Configuration issues for guild ${guild.id}: ${missingFields.join(', ')}`);
-        return; // Stop further execution if the configuration is incomplete
+        return; // Stop execution if config is incomplete
       }
-    
-      const keywords = config.allianceWhitelist;
+  
       const targetChannelId = config.verificationChannelId;
-    
-      // Log details for debugging
+  
       if (!targetChannelId) {
         console.error(`Verification channel ID is missing for guild ${guild.id}.`);
         return;
       }
-    
-      // If the message is not in the specified verification channel, ignore it
+  
+      // Ignore messages outside the verification channel
       if (message.channel.id !== targetChannelId) {
-        console.log(`Message ignored. Not in the verification channel: ${targetChannelId}`);
         return;
       }
-    
-      // Process the message (add your image processing logic here)
+  
       console.log(`Processing message in the verification channel: ${message.content}`);
-      // Example: Add your image processing logic here
+  
+      // Fetch all alliance keywords for this guild
+      const keywords = await Keyword.find({ guildId: guild.id });
+  
+      if (!keywords.length) {
+        console.log(`No alliance keywords configured for guild ${guild.id}.`);
+        return;
+      }
+  
+      // Process message content to check for matching keywords
+      const matchedKeyword = keywords.find(kw => message.content.includes(kw.keyword));
+  
+      if (matchedKeyword) {
+        console.log(`Matched keyword: ${matchedKeyword.keyword}`);
+        // Call role assignment function (assume member is available)
+        await assignAllianceRoles(message.member, matchedKeyword.keyword);
+      } else {
+        console.log('No matching keyword found in the message.');
+      }
     } catch (error) {
       console.error(`An error occurred while processing the message: ${error.message}`);
     }
+
+    const keywords = Config.keyword;
 
     if (message.attachments.size === 0) {
       console.log('No attachments in the message.');
@@ -168,22 +185,32 @@ module.exports = {
             }
           }
 
-          // Alliance Region Check
           const checkAlliance = { left: 577, top: 274, width: 391, height: 156 };
+
           try {
             console.log('Starting alliance region extraction.');
             const extractedAllianceBuffer = await sharp(dynamicCropBuffer).extract(checkAlliance).toBuffer();
             const { data: { text } } = await tesseract.recognize(extractedAllianceBuffer, 'eng');
             console.log('OCR result for alliance region:', text);
 
-            const matches = text.match(/\[([^\]]+)\]/); 
+            const matches = text.match(/\[([^\]]+)\]/);
             if (matches && matches[1]) {
               const bracketContent = matches[1].trim();
               console.log(`Found alliance content: ${bracketContent}`);
 
-              const isValid = keywords.some((keyword) =>
-                bracketContent.toLowerCase().includes(keyword.toLowerCase())
-              );
+              // Fetch keywords from the database
+              const keywordDocs = await Keyword.find({ guildId: message.guild.id }).select('keyword');
+              const keywords = keywordDocs.map(k => k.keyword); // Extract keywords as an array of strings
+
+              // Ensure keywords list is not empty
+              if (!keywords || keywords.length === 0) {
+                console.warn('No keywords configured. Skipping keyword-based validation.');
+                failures.push('No alliance keywords have been set.');
+                return;
+              }
+
+              // Check if bracketContent matches any keyword exactly (case-sensitive)
+              const isValid = keywords.some(keyword => bracketContent === keyword);
 
               if (!isValid) {
                 failures.push(`Invalid alliance content: ${bracketContent}`);
@@ -199,14 +226,27 @@ module.exports = {
             failures.push(`Alliance region processing error: ${allianceError.message}`);
           }
 
-          // RoK ID Check
-          const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
+
+          // Define the directory for saving images
+          const saveDir = path.resolve(__dirname, '../images/savedImages');
+
+          // Ensure the directory exists
+          if (!fs.existsSync(saveDir)) {
+            fs.mkdirSync(saveDir, { recursive: true }); // Create the directory and its parents if needed
+          }
+
           try {
+            const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
             console.log('Extracting RoK ID region.');
             const rokIdBuffer = await sharp(dynamicCropBuffer)
               .extract(rokIdRegion)
               .modulate({ brightness: 1.5 })
               .toBuffer();
+
+            // Save the extracted image
+            const outputPath = path.join(saveDir, `rokId_${message.author.id}_${Date.now()}.png`);
+            await sharp(rokIdBuffer).toFile(outputPath);
+            console.log(`Saved RoK ID image to ${outputPath}`);
 
             console.log('Running OCR on RoK ID region.');
             const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
@@ -253,16 +293,39 @@ module.exports = {
               console.error('Failed to create ticket:', ticketError.message);
             }
 
-          } else {
-            if (passedAllChecks) {
-              const matchedKeyword = keywords.find(keyword => messageContent.includes(keyword));
-            
-              // Assign roles (default verified + specific role for matched keyword, if any)
-              await assignRoles(member, matchedKeyword);
-            
-              console.log(`All checks passed for ${member.user.tag}. Roles assigned.`);
-            }
+          } // Fetch keywords from MongoDB before using them
+          const keywordDocs = await Keyword.find({ guildId: message.guild.id }).select('keyword');
+          const keywords = keywordDocs.map(k => k.keyword); // Extract keywords as an array of strings
+          
+          // Log the fetched keywords for debugging
+          console.log(`Fetched keywords from DB for guild ${message.guild.id}:`, keywords);
+          
+          if (!keywords || keywords.length === 0) {
+            console.warn('No keywords configured. Skipping keyword-based role assignment.');
+            return;
           }
+          
+          // Find the keyword in the message content
+          const matchedKeyword = keywords.find(keyword => message.content.includes(keyword));
+          console.log(`Matched Keyword: ${matchedKeyword}`);
+          
+          if (matchedKeyword) {
+            console.log(`Matched keyword: ${matchedKeyword}`);
+          } else {
+            console.log('No matching keyword found.');
+          }
+          
+          try {
+            // Call the assignRoles function
+            if (matchedKeyword) {
+              await assignAllianceRoles(member, matchedKeyword);
+            } else {
+              console.log(`No keyword matched for ${member.user.tag}, skipping role assignment.`);
+            }
+          } catch (error) {
+            console.error(`Error while assigning roles to ${member.user.tag}:`, error);
+          }
+          
 
           await message.delete().catch((err) =>
             console.error('Failed to delete the message:', err)

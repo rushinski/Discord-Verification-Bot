@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const Config = require('../models/Config');
+const Keyword = require('../models/Keyword');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,45 +23,23 @@ module.exports = {
       return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
 
-    const keyword = interaction.options.getString('keyword').toLowerCase(); // Normalize keyword
+    const guildId = interaction.guild.id;
+    const keyword = interaction.options.getString('keyword'); // Preserve original case
     const roleId = interaction.options.getString('roleid');
 
-    // Fetch the guild configuration
-    let config = await Config.findOne({ guildId: interaction.guild.id });
+    // Check if the keyword already exists for this guild (case-sensitive)
+    const existingKeyword = await Keyword.findOne({ guildId, keyword });
 
-    // Create a new config document if none exists
-    if (!config) {
-      config = new Config({ guildId: interaction.guild.id });
-    }
-
-    // Ensure allianceWhitelist is initialized
-    if (!config.allianceWhitelist) {
-      config.allianceWhitelist = [];
-    }
-
-    // Ensure keywordRoles map is initialized
-    if (!config.keywordRoles) {
-      config.keywordRoles = new Map();
-    }
-
-    // Check if the keyword already exists in the whitelist
-    if (config.allianceWhitelist.includes(keyword)) {
+    if (existingKeyword) {
       return interaction.reply({
         content: `The keyword "${keyword}" is already in the whitelist.`,
         ephemeral: true,
       });
     }
 
-    // Add the keyword to the whitelist
-    config.allianceWhitelist.push(keyword);
-
-    // If a role ID is provided, associate it with the keyword
-    if (roleId) {
-      config.keywordRoles.set(keyword, roleId);
-    }
-
-    // Save the updated configuration
-    await config.save();
+    // Create and save the new keyword entry
+    const newKeyword = new Keyword({ guildId, keyword, roleId });
+    await newKeyword.save();
 
     return interaction.reply({
       content: `Alliance keyword "${keyword}" has been added${roleId ? ` with role ID "${roleId}"` : ''}.`,

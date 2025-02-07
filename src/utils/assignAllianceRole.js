@@ -8,17 +8,18 @@ const Config = require('../models/Config');
  */
 async function assignRoles(member, matchedKeyword) {
   try {
-    // Fetch the guild's configuration from the database
     const config = await Config.findOne({ guildId: member.guild.id });
+    console.log('Retrieved Config:', config);
 
     if (!config) {
       console.warn('Configuration not found for this guild. Cannot assign roles.');
       return;
     }
 
-    // Assign the default verified role, if configured
+    // Assign the default verified role
     if (config.verifiedRoleId) {
       const verifiedRole = member.guild.roles.cache.get(config.verifiedRoleId);
+      console.log('Verified Role:', verifiedRole);
       if (verifiedRole) {
         await member.roles.add(verifiedRole);
         console.log(`Verified role assigned to ${member.user.tag}`);
@@ -27,11 +28,16 @@ async function assignRoles(member, matchedKeyword) {
       }
     }
 
-    // Assign a role based on the matched keyword, if provided and valid
-    if (matchedKeyword && config.keywordRoles && config.keywordRoles instanceof Map) {
-      const keywordRoleId = config.keywordRoles.get(matchedKeyword); // Use Map's `get` method
+    // Assign a role based on the matched keyword
+    if (matchedKeyword) {
+      console.log('Matched Keyword:', matchedKeyword);
+      const keywordRoleId = config.keywordRoles.get(matchedKeyword);
+      console.log(`Keyword Role ID for "${matchedKeyword}":`, keywordRoleId);
+
       if (keywordRoleId) {
         const keywordRole = member.guild.roles.cache.get(keywordRoleId);
+        console.log('Keyword Role:', keywordRole);
+
         if (keywordRole) {
           await member.roles.add(keywordRole);
           console.log(`Role for keyword "${matchedKeyword}" assigned to ${member.user.tag}`);
@@ -41,6 +47,8 @@ async function assignRoles(member, matchedKeyword) {
       } else {
         console.warn(`No role configured for keyword "${matchedKeyword}".`);
       }
+    } else {
+      console.log(`No keyword matched for ${member.user.tag}.`);
     }
   } catch (error) {
     console.error('Error assigning roles:', error);
