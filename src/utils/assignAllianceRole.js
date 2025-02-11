@@ -22,48 +22,42 @@ async function assignAllianceRoles(member, matchedKeyword) {
       return;
     }
 
-    // Assign the default Kingdom Member Role
-    if (config.kingdomRoleId) {
-      const kingdomRole = await member.guild.roles.fetch(config.kingdomRoleId);
+    // Assign the default Kingdom Member role
+    if (config.kingdomMemberRoleId) {
+      const kingdomRole = await member.guild.roles.fetch(config.kingdomMemberRoleId);
       if (kingdomRole) {
         await member.roles.add(kingdomRole);
-        console.log(`Kingdom Member Role assigned to ${member.user.tag}`);
+        console.log(`Kingdom Member role assigned to ${member.user.tag}`);
       } else {
-        console.warn('Kingdom Member Role not found in guild roles.');
+        console.warn('Kingdom Member role not found in guild roles.');
       }
     }
 
-    // Assign an alliance role based on the matched keyword
+    // Assign a role based on the matched keyword (if available)
     if (matchedKeyword) {
       console.log('Matched Keyword:', matchedKeyword);
 
-      // Fetch all keywords for debugging
-      const allKeywords = await Keyword.find({ guildId: member.guild.id });
-      console.log('All stored keywords for this guild:', allKeywords);
-
-      // Find the keyword document where roleId matches matchedKeyword
       const keywordDoc = await Keyword.findOne({
         guildId: member.guild.id,
-        roleId: String(matchedKeyword), // We are now searching by roleId instead of keyword
+        roleId: String(matchedKeyword), // Searching by role ID
       });
 
-      if (keywordDoc) {
+      if (keywordDoc && keywordDoc.roleId) {
         const keywordRole = await member.guild.roles.fetch(keywordDoc.roleId);
         if (keywordRole) {
           await member.roles.add(keywordRole);
-          console.log(`Alliance Role "${keywordDoc.roleId}" assigned to ${member.user.tag} (linked to keyword "${keywordDoc.keyword}")`);
+          console.log(`Role "${keywordDoc.roleId}" assigned to ${member.user.tag} (linked to keyword "${keywordDoc.keyword}")`);
         } else {
           console.warn(`Role ID "${keywordDoc.roleId}" not found in the guild.`);
         }
       } else {
-        console.warn(`No keyword is linked to role ID "${matchedKeyword}". Skipping role assignment.`);
+        console.warn(`No keyword-linked role found for "${matchedKeyword}".`);
       }
-    } else {
-      console.warn(`No keyword matched for ${member.user.tag}. Skipping keyword-based role assignment.`);
     }
   } catch (error) {
     console.error('Error assigning roles:', error);
   }
 }
+
 
 module.exports = assignAllianceRoles;

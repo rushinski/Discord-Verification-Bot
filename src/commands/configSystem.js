@@ -15,9 +15,8 @@ module.exports = {
       option.setName('verification-channel-id').setDescription('The channel ID for verification.').setRequired(false)
     )
     .addStringOption(option =>
-      option.setName('kingdom-role-id').setDescription('The Kingdom Member Role ID.').setRequired(false)
+      option.setName('kingdom-member-role-id').setDescription('The role ID for Kingdom Members.').setRequired(false)
     ),
-  
   async execute(interaction) {
     if (!interaction.member.permissions.has('Administrator')) {
       return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -26,13 +25,13 @@ module.exports = {
     const roleId = interaction.options.getString('roleid');
     const categoryId = interaction.options.getString('categoryid');
     const verificationChannelId = interaction.options.getString('verification-channel-id');
-    const kingdomRoleId = interaction.options.getString('kingdom-role-id');
+    const kingdomMemberRoleId = interaction.options.getString('kingdom-member-role-id');
 
     const updates = {};
     if (roleId) updates.roleId = roleId;
     if (categoryId) updates.ticketCategoryId = categoryId;
     if (verificationChannelId) updates.verificationChannelId = verificationChannelId;
-    if (kingdomRoleId) updates.kingdomRoleId = kingdomRoleId; // New Kingdom Member Role
+    if (kingdomMemberRoleId) updates.kingdomMemberRoleId = kingdomMemberRoleId;
 
     let config = await Config.findOne({ guildId: interaction.guild.id });
 
@@ -44,7 +43,11 @@ module.exports = {
     await config.save();
 
     return interaction.reply({
-      content: `Configuration updated:\nRole ID: ${config.roleId || 'Not Set'}\nCategory ID: ${config.ticketCategoryId || 'Not Set'}\nVerification Channel ID: ${config.verificationChannelId || 'Not Set'}\nKingdom Role ID: ${config.kingdomRoleId || 'Not Set'}`,
+      content: `Configuration updated:
+      \nRole ID: ${config.roleId || 'Not Set'}
+      \nCategory ID: ${config.ticketCategoryId || 'Not Set'}
+      \nVerification Channel ID: ${config.verificationChannelId || 'Not Set'}
+      \nKingdom Member Role ID: ${config.kingdomMemberRoleId || 'Not Set'}`,
       ephemeral: true,
     });
   },

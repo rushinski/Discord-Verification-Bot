@@ -5,7 +5,7 @@ const configSchema = new mongoose.Schema({
   roleId: { type: String }, // Role ID for tickets or moderation
   ticketCategoryId: { type: String }, // Ticket category channel ID
   verificationChannelId: { type: String }, // Verification channel ID
-  kingdomRoleId: { type: String }, // NEW: Kingdom Member Role ID
+  kingdomMemberRoleId: { type: String }, // Kingdom Member role ID (new field)
 });
 
 module.exports = mongoose.model('Config', configSchema);

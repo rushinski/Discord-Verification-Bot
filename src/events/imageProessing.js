@@ -305,11 +305,11 @@ module.exports = {
 
               // Find the corresponding keyword document to get role ID (if available)
               const keywordDoc = await Keyword.findOne({ guildId: message.guild.id, keyword: matchedKeyword });
-
-              if (keywordDoc && keywordDoc.roleId) {
-                await assignAllianceRoles(member, keywordDoc.roleId); // Assign alliance role if it exists
+              if (keywordDoc) {
+                await assignAllianceRoles(member, keywordDoc.roleId || null); // Always call the function
               } else {
-                console.log(`No specific role assigned for keyword: ${matchedKeyword}, skipping alliance role assignment.`);
+                console.log(`No specific role assigned for keyword: ${matchedKeyword}, assigning only the default role.`);
+                await assignAllianceRoles(member, null); // Assign only the default role
               }
             } else {
               console.log('No matching keyword found from OCR extraction.');
