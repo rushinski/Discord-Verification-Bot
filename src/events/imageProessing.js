@@ -229,45 +229,59 @@ module.exports = {
           try {
             const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
             console.log('Extracting RoK ID region.');
+    
+            // Preprocess image using Sharp.js
             const rokIdBuffer = await sharp(dynamicCropBuffer)
-              .extract(rokIdRegion)
-              .modulate({ brightness: 1.5 })
-              .toBuffer();
-
-            // Save the extracted image
+                .extract(rokIdRegion)  // Crop the relevant area
+                .grayscale()            // Convert to grayscale
+                .threshold(150)         // Apply binarization (adjust threshold as needed)
+                .normalize()            // Normalize brightness & contrast
+                .modulate({ brightness: 2, contrast: 1.5 }) // Boost contrast
+                .toBuffer();
+    
+            // Save the processed image for debugging
             const outputPath = path.join(saveDir, `rokId_${message.author.id}_${Date.now()}.png`);
             await sharp(rokIdBuffer).toFile(outputPath);
             console.log(`Saved RoK ID image to ${outputPath}`);
-
+    
             console.log('Running OCR on RoK ID region.');
-            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng');
-            console.log('OCR result for RoK ID region:', rokIdText);
-
+    
+            // Run OCR with Tesseract optimizations
+            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng', {
+                tessedit_char_whitelist: '0123456789ID:', // Allow only numbers and "ID:"
+                tessedit_pageseg_mode: 6, // Assume a uniform block of text
+                oem: 1, // Use LSTM OCR engine for better accuracy
+            });
+    
+            console.log('OCR raw result:', rokIdText);
+    
+            // Extract only the numbers inside "(ID: numbers)" format
             const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
-
+    
             if (rokIdMatch && rokIdMatch[1]) {
-              const rokid = rokIdMatch[1];
-              console.log(`Extracted RoK ID: ${rokid}`);
-
-              const existingUser = await User.findOne({ rokid });
-              if (existingUser) {
-                failures.push(`RoK ID ${rokid} already exists in the database.`);
-                console.log(`RoK ID ${rokid} already exists.`);
-              } else {
-                console.log(`Adding RoK ID ${rokid} to the database.`);
-                await User.create({
-                  discordUserId: message.author.id,
-                  rokid,
-                });
-              }
+                const rokid = rokIdMatch[1]; // Extract only the RoK ID inside (ID: numbers)
+                console.log(`Extracted RoK ID: ${rokid}`);
+    
+                // Check if RoK ID already exists
+                const existingUser = await User.findOne({ rokid });
+                if (existingUser) {
+                    failures.push(`RoK ID ${rokid} already exists in the database.`);
+                    console.log(`RoK ID ${rokid} already exists.`);
+                } else {
+                    console.log(`Adding RoK ID ${rokid} to the database.`);
+                    await User.create({
+                        discordUserId: message.author.id,
+                        rokid,
+                    });
+                }
             } else {
-              failures.push('Failed to extract a valid RoK ID.');
-              console.warn('No valid RoK ID found in the OCR result.');
+                failures.push('Failed to extract a valid RoK ID.');
+                console.warn('No valid RoK ID found in the OCR result.');
             }
-          } catch (rokIdError) {
+        } catch (rokIdError) {
             console.error('Error processing RoK ID region:', rokIdError.message);
             failures.push(`Error processing RoK ID region: ${rokIdError.message}`);
-          }
+        }
 
           // Ticket Creation if Failures Exist
           if (failures.length > 0) {
