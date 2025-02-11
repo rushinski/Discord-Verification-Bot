@@ -1,13 +1,19 @@
 const { GuildMember } = require('discord.js');
 const Config = require('../models/Config');
+const Keyword = require('../models/Keyword'); // Ensure correct import
 
 /**
  * Assign roles based on keyword match and default verified role.
  * @param {GuildMember} member - The Discord member to assign roles to.
  * @param {string} matchedKeyword - The keyword that was matched (optional).
  */
-async function assignRoles(member, matchedKeyword) {
+async function assignAllianceRoles(member, matchedKeyword) {
   try {
+    if (!member) {
+      console.warn('Invalid member provided. Cannot assign roles.');
+      return;
+    }
+
     const config = await Config.findOne({ guildId: member.guild.id });
     console.log('Retrieved Config:', config);
 
@@ -18,8 +24,7 @@ async function assignRoles(member, matchedKeyword) {
 
     // Assign the default verified role
     if (config.verifiedRoleId) {
-      const verifiedRole = member.guild.roles.cache.get(config.verifiedRoleId);
-      console.log('Verified Role:', verifiedRole);
+      const verifiedRole = await member.guild.roles.fetch(config.verifiedRoleId);
       if (verifiedRole) {
         await member.roles.add(verifiedRole);
         console.log(`Verified role assigned to ${member.user.tag}`);
@@ -31,28 +36,34 @@ async function assignRoles(member, matchedKeyword) {
     // Assign a role based on the matched keyword
     if (matchedKeyword) {
       console.log('Matched Keyword:', matchedKeyword);
-      const keywordRoleId = config.keywordRoles.get(matchedKeyword);
-      console.log(`Keyword Role ID for "${matchedKeyword}":`, keywordRoleId);
 
-      if (keywordRoleId) {
-        const keywordRole = member.guild.roles.cache.get(keywordRoleId);
-        console.log('Keyword Role:', keywordRole);
+      // Fetch all keywords for debugging
+      const allKeywords = await Keyword.find({ guildId: member.guild.id });
+      console.log('All stored keywords for this guild:', allKeywords);
 
+      // Find the keyword document where roleId matches matchedKeyword
+      const keywordDoc = await Keyword.findOne({
+        guildId: member.guild.id,
+        roleId: String(matchedKeyword), // We are now searching by roleId instead of keyword
+      });
+
+      if (keywordDoc) {
+        const keywordRole = await member.guild.roles.fetch(keywordDoc.roleId);
         if (keywordRole) {
           await member.roles.add(keywordRole);
-          console.log(`Role for keyword "${matchedKeyword}" assigned to ${member.user.tag}`);
+          console.log(`Role "${keywordDoc.roleId}" assigned to ${member.user.tag} (linked to keyword "${keywordDoc.keyword}")`);
         } else {
-          console.warn(`Role for keyword "${matchedKeyword}" not found in guild roles.`);
+          console.warn(`Role ID "${keywordDoc.roleId}" not found in the guild.`);
         }
       } else {
-        console.warn(`No role configured for keyword "${matchedKeyword}".`);
+        console.warn(`No keyword is linked to role ID "${matchedKeyword}". Skipping role assignment.`);
       }
     } else {
-      console.log(`No keyword matched for ${member.user.tag}.`);
+      console.warn(`No keyword matched for ${member.user.tag}. Skipping keyword-based role assignment.`);
     }
   } catch (error) {
     console.error('Error assigning roles:', error);
   }
 }
 
-module.exports = assignRoles;
+module.exports = assignAllianceRoles;
