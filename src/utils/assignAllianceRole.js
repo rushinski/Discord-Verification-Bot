@@ -3,7 +3,7 @@ const Config = require('../models/Config');
 const Keyword = require('../models/Keyword'); // Ensure correct import
 
 /**
- * Assign roles based on keyword match and default verified role.
+ * Assign roles based on keyword match and default kingdom role.
  * @param {GuildMember} member - The Discord member to assign roles to.
  * @param {string} matchedKeyword - The keyword that was matched (optional).
  */
@@ -22,18 +22,18 @@ async function assignAllianceRoles(member, matchedKeyword) {
       return;
     }
 
-    // Assign the default verified role
-    if (config.verifiedRoleId) {
-      const verifiedRole = await member.guild.roles.fetch(config.verifiedRoleId);
-      if (verifiedRole) {
-        await member.roles.add(verifiedRole);
-        console.log(`Verified role assigned to ${member.user.tag}`);
+    // Assign the default Kingdom Member Role
+    if (config.kingdomRoleId) {
+      const kingdomRole = await member.guild.roles.fetch(config.kingdomRoleId);
+      if (kingdomRole) {
+        await member.roles.add(kingdomRole);
+        console.log(`Kingdom Member Role assigned to ${member.user.tag}`);
       } else {
-        console.warn('Verified role not found in guild roles.');
+        console.warn('Kingdom Member Role not found in guild roles.');
       }
     }
 
-    // Assign a role based on the matched keyword
+    // Assign an alliance role based on the matched keyword
     if (matchedKeyword) {
       console.log('Matched Keyword:', matchedKeyword);
 
@@ -51,7 +51,7 @@ async function assignAllianceRoles(member, matchedKeyword) {
         const keywordRole = await member.guild.roles.fetch(keywordDoc.roleId);
         if (keywordRole) {
           await member.roles.add(keywordRole);
-          console.log(`Role "${keywordDoc.roleId}" assigned to ${member.user.tag} (linked to keyword "${keywordDoc.keyword}")`);
+          console.log(`Alliance Role "${keywordDoc.roleId}" assigned to ${member.user.tag} (linked to keyword "${keywordDoc.keyword}")`);
         } else {
           console.warn(`Role ID "${keywordDoc.roleId}" not found in the guild.`);
         }
