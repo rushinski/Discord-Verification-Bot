@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const Config = require('../models/Config');
+const Keyword = require('../models/Keyword');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,32 +18,18 @@ module.exports = {
 
     const keyword = interaction.options.getString('keyword');
 
-    // Fetch the guild configuration
-    let config = await Config.findOne({ guildId: interaction.guild.id });
+    // Check if the keyword exists
+    const existingKeyword = await Keyword.findOne({ guildId: interaction.guild.id, keyword });
 
-    if (!config) {
-      return interaction.reply({
-        content: 'Configuration not found for this guild. Please set it up first.',
-        ephemeral: true,
-      });
-    }
-
-    // Ensure allianceWhitelist is initialized as an array
-    if (!config.allianceWhitelist) {
-      config.allianceWhitelist = [];
-    }
-
-    // Check if the keyword exists in the whitelist
-    if (!config.allianceWhitelist.includes(keyword)) {
+    if (!existingKeyword) {
       return interaction.reply({
         content: `The keyword "${keyword}" does not exist in the whitelist.`,
         ephemeral: true,
       });
     }
 
-    // Remove the keyword from the whitelist
-    config.allianceWhitelist = config.allianceWhitelist.filter(item => item !== keyword);
-    await config.save();
+    // Remove the keyword from the database
+    await Keyword.deleteOne({ guildId: interaction.guild.id, keyword });
 
     return interaction.reply({
       content: `Alliance keyword "${keyword}" has been removed from the whitelist.`,
