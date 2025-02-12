@@ -184,7 +184,6 @@ module.exports = {
             if (!matches || !matches[1]) {
               failures.push('Missing or invalid alliance brackets content.');
               console.warn('No valid alliance brackets or content found.');
-              return;
             }
           
             const bracketContent = matches[1].trim();
@@ -284,7 +283,7 @@ module.exports = {
               await createTicket({
                 guild: message.guild,
                 user: message.author,
-                imageBuffer: dynamicCropBuffer,
+                imageBuffer: imageBuffer,
                 failures,
               });
             } catch (ticketError) {
