@@ -59,8 +59,6 @@ module.exports = {
       console.error(`An error occurred while processing the message: ${error.message}`);
     }
 
-    const keywords = Config.keyword;
-
     if (message.attachments.size === 0) {
       console.log('No attachments in the message.');
       return;
@@ -218,71 +216,67 @@ module.exports = {
             failures.push(`Alliance region processing error: ${allianceError.message}`);
           }
 
-          // Define the directory for saving images
-          const saveDir = path.resolve(__dirname, '../images/savedImages');
+          // // Define the directory for saving images
+          // const saveDir = path.resolve(__dirname, '../images/savedImages');
 
-          // Ensure the directory exists
+          /* // Ensure the directory exists
           if (!fs.existsSync(saveDir)) {
             fs.mkdirSync(saveDir, { recursive: true }); // Create the directory and its parents if needed
-          }
+          } */
 
-          try {
-            const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
-            console.log('Extracting RoK ID region.');
-    
-            // Preprocess image using Sharp.js
-            const rokIdBuffer = await sharp(dynamicCropBuffer)
-                .extract(rokIdRegion)  // Crop the relevant area
-                .grayscale()            // Convert to grayscale
-                .threshold(150)         // Apply binarization (adjust threshold as needed)
-                .normalize()            // Normalize brightness & contrast
-                .modulate({ brightness: 2, contrast: 1.5 }) // Boost contrast
-                .toBuffer();
-    
-            // Save the processed image for debugging
-            const outputPath = path.join(saveDir, `rokId_${message.author.id}_${Date.now()}.png`);
-            await sharp(rokIdBuffer).toFile(outputPath);
-            console.log(`Saved RoK ID image to ${outputPath}`);
-    
-            console.log('Running OCR on RoK ID region.');
-    
-            // Run OCR with Tesseract optimizations
-            const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng', {
-                tessedit_char_whitelist: '0123456789ID:', // Allow only numbers and "ID:"
-                tessedit_pageseg_mode: 6, // Assume a uniform block of text
-                oem: 1, // Use LSTM OCR engine for better accuracy
-            });
-    
-            console.log('OCR raw result:', rokIdText);
-    
-            // Extract only the numbers inside "(ID: numbers)" format
-            const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
-    
-            if (rokIdMatch && rokIdMatch[1]) {
-                const rokid = rokIdMatch[1]; // Extract only the RoK ID inside (ID: numbers)
-                console.log(`Extracted RoK ID: ${rokid}`);
-    
-                // Check if RoK ID already exists
-                const existingUser = await User.findOne({ rokid });
-                if (existingUser) {
-                    failures.push(`RoK ID ${rokid} already exists in the database.`);
-                    console.log(`RoK ID ${rokid} already exists.`);
-                } else {
-                    console.log(`Adding RoK ID ${rokid} to the database.`);
-                    await User.create({
-                        discordUserId: message.author.id,
-                        rokid,
-                    });
-                }
+          
+          const rokIdRegion = { left: 512, top: 39, width: 795, height: 365 };
+          console.log('Extracting RoK ID region.');
+  
+          // Preprocess image using Sharp.js
+          const rokIdBuffer = await sharp(dynamicCropBuffer)
+              .extract(rokIdRegion)  // Crop the relevant area
+              .grayscale()            // Convert to grayscale
+              .threshold(150)         // Apply binarization (adjust threshold as needed)
+              .normalize()            // Normalize brightness & contrast
+              .modulate({ brightness: 2, contrast: 1.5 }) // Boost contrast
+              .toBuffer();
+  
+          // // Save the processed image for debugging
+          // const outputPath = path.join(saveDir, `rokId_${message.author.id}_${Date.now()}.png`);
+          // await sharp(rokIdBuffer).toFile(outputPath);
+          // console.log(`Saved RoK ID image to ${outputPath}`);
+  
+          console.log('Running OCR on RoK ID region.');
+  
+          // Run OCR with Tesseract optimizations
+          const { data: { text: rokIdText } } = await tesseract.recognize(rokIdBuffer, 'eng', {
+              tessedit_char_whitelist: '0123456789ID:', // Allow only numbers and "ID:"
+              tessedit_pageseg_mode: 6, // Assume a uniform block of text
+              oem: 1, // Use LSTM OCR engine for better accuracy
+          });
+  
+          console.log('OCR raw result:', rokIdText);
+  
+          // Extract only the numbers inside "(ID: numbers)" format
+          const rokIdMatch = rokIdText.match(/ID:\s*(\d+)/);
+  
+          if (rokIdMatch && rokIdMatch[1]) {
+            const rokid = rokIdMatch[1]; // Extract only the RoK ID inside (ID: numbers)
+            console.log(`Extracted RoK ID: ${rokid}`);
+          
+            // Check if RoK ID already exists
+            const existingUser = await User.findOne({ rokid });
+            if (existingUser) {
+              failures.push(`RoK ID ${rokid} already exists in the database.`);
+              console.log(`RoK ID ${rokid} already exists.`);
             } else {
-                failures.push('Failed to extract a valid RoK ID.');
-                console.warn('No valid RoK ID found in the OCR result.');
+              console.log(`Adding RoK ID ${rokid} to the database.`);
+              await User.create({
+                discordUserId: message.author.id,
+                rokid,
+              });
             }
-        } catch (rokIdError) {
-            console.error('Error processing RoK ID region:', rokIdError.message);
-            failures.push(`Error processing RoK ID region: ${rokIdError.message}`);
-        }
-
+          } else {
+            failures.push('Failed to extract a valid RoK ID.');
+            console.warn('No valid RoK ID found in the OCR result.');
+          }
+          
           // Ticket Creation if Failures Exist
           if (failures.length > 0) {
             console.log('Failures detected. Creating a ticket.');
@@ -297,26 +291,25 @@ module.exports = {
               console.error('Failed to create ticket:', ticketError.message);
             }
           } else {
-            
             // Fetch keywords from the database
             const keywords = await Keyword.find({ guildId: message.guild.id }).lean();
-            
+          
             console.log("Fetched Keywords from DB:", keywords.map(k => k.keyword)); // Debug keywords
-            
+          
             if (!keywords || keywords.length === 0) {
               console.log("No keywords found for this guild.");
               return;
             }
-            
+          
             // Process message content to check for matching keywords
             const matchedKeyword = message.matchedKeyword;
-
+          
             if (matchedKeyword) {
               console.log(`Matched keyword: ${matchedKeyword}`);
-
+          
               // Fetch member and assign alliance roles if applicable
               const member = await message.guild.members.fetch(message.author.id);
-
+          
               // Find the corresponding keyword document to get role ID (if available)
               const keywordDoc = await Keyword.findOne({ guildId: message.guild.id, keyword: matchedKeyword });
               if (keywordDoc) {
@@ -325,10 +318,64 @@ module.exports = {
                 console.log(`No specific role assigned for keyword: ${matchedKeyword}, assigning only the default role.`);
                 await assignAllianceRoles(member, null); // Assign only the default role
               }
+          
+              // Get the logging channel
+              const config = await Config.findOne({ guildId: message.guild.id });
+              if (!config || !config.validMemberLogId) {
+                console.error(`Valid member logging channel not set for guild ${message.guild.id}.`);
+                return;
+              }
+
+              const loggingChannel = message.guild.channels.cache.get(config.validMemberLogId);
+              if (!loggingChannel) {
+                console.error(`Logging channel with ID ${config.validMemberLogId} not found.`);
+                return;
+              }
+
+              // Get the user’s profile picture
+              const userAvatar = message.author.displayAvatarURL({ format: 'png', size: 1024 });
+
+              // Calculate time in server
+              const joinedAt = member.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:R>` : "Unknown";
+
+              // Calculate Discord account age
+              const createdAt = `<t:${Math.floor(message.author.createdAt.getTime() / 1000)}:R>`;
+
+              // Prepare attachment
+              const imageUrl = dynamicCropBuffer ? `attachment://rok_account_${message.author.id}.png` : null;
+
+              // Create the embed
+              const embed = {
+                color: 0x00ff00, // Green color
+                title: "✅ User Verified Successfully ✅",
+                thumbnail: { url: userAvatar },
+                image: imageUrl ? { url: imageUrl } : null,
+                fields: [
+                  { name: "Discord Username", value: message.author.tag, inline: true },
+                  { name: "Discord Ping", value: `<@${message.author.id}>`, inline: true },
+                  { name: "Discord User ID", value: message.author.id, inline: true },
+                  { name: "Alliance", value: matchedKeyword || "N/A", inline: true },
+                  { name: "Time in Server", value: joinedAt, inline: true },
+                  { name: "Discord Account Age", value: createdAt, inline: true },
+                  { name: "Verification Type", value: "Auto Verification", inline: true },
+                ],
+                timestamp: new Date(),
+              };
+
+              // Prepare attachments
+              const attachments = dynamicCropBuffer ? [{ attachment: dynamicCropBuffer, name: `rok_account_${message.author.id}.png` }] : [];
+
+              // Send the log message with the embed and attachment
+              loggingChannel.send({
+                content: `**Verified User:** ${message.author.tag}`, // Username outside embed for searchability
+                embeds: [embed],
+                files: attachments,
+              }).then(() => console.log(`Successfully logged verification for ${message.author.tag}`))
+                .catch(console.error);
             } else {
               console.log('No matching keyword found from OCR extraction.');
             }
-          }     
+          }
           
           await message.delete().catch((err) =>
             console.error('Failed to delete the message:', err)
